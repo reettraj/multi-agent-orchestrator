@@ -1,0 +1,43 @@
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution and packaging artifacts
+build/
+dist/
+downloads/
+egg-info/
+*.egg
+*.egg-info/
+
+# Test, coverage, and type-checker caches
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+.pytype/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE and local environment files
+.python-version
+.env
+.env.*
+!.env.example
+
+# Logs and editor swap files
+*.log
+*.swp
+*.swo
