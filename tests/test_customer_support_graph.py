@@ -104,6 +104,7 @@ def test_policy_request_runs_policy_agent_only() -> None:
 
     assert result["route"] == "policy"
     assert result["policy_result"]["final_sale"] is True
+    assert result["final_response"] == "Sale items are final sale."
     assert result["operations_result"] is None
     assert result["escalation_result"] is None
     assert policy_llm.structured.invocation_count == 1
@@ -138,6 +139,8 @@ def test_order_status_request_runs_operations_agent_only() -> None:
 
     assert result["route"] == "operations"
     assert result["operations_result"]["order_status"] == "Processing"
+    assert result["final_response"] == "The current status of your order is Processing."
+    assert "purchase date" not in result["final_response"].lower()
     assert result["policy_result"] is None
     assert result["escalation_result"] is None
     assert len(operations_llm.bound_tools) == 2
@@ -176,6 +179,10 @@ def test_damaged_refund_request_runs_escalation_agent_only() -> None:
     assert result["route"] == "escalation"
     assert result["escalation_result"]["required"] is True
     assert result["escalation_result"]["priority"] == "high"
+    assert result["final_response"] == (
+        "Human review is required: The customer is requesting a refund, which needs human review. "
+        "The customer reports a damaged or defective item that needs human assessment."
+    )
     assert result["policy_result"] is None
     assert result["operations_result"] is None
     assert escalation_llm.structured.invocation_count == 1
@@ -203,4 +210,16 @@ def test_graph_uses_supervisor_route_as_its_only_dispatch_value() -> None:
     assert result["route"] == "policy"
     assert result["route_reason"]
     assert result["policy_result"]["decision"] == "insufficient_information"
-    assert result["final_response"] is None
+    assert result["final_response"] == "An informational sizing policy question."
+
+
+def test_final_response_contains_only_order_facts_in_operations_result() -> None:
+    operations_llm = _order_status_llm()
+    app = build_customer_support_graph(operations_llm=operations_llm)
+
+    result = app.invoke(_state("Where is order #1002?"))
+
+    assert result["operations_result"]["purchase_date"] is None
+    assert result["final_response"] == "The current status of your order is Processing."
+    assert "delivered" not in result["final_response"].lower()
+    assert "purchase date" not in result["final_response"].lower()
