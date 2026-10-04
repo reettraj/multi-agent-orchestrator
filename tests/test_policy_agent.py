@@ -1,6 +1,7 @@
 """Focused tests for the Policy Agent without external API calls."""
 
 from collections.abc import Sequence
+from datetime import date, timedelta
 
 from langchain_core.documents import Document
 
@@ -173,6 +174,44 @@ def test_retrieved_policy_context_is_passed_to_the_llm() -> None:
     assert "When will my refund be processed?" in prompt_text
     assert policy_text in prompt_text
     assert "Ground every policy claim in that context" in prompt_text
+
+
+def test_verified_order_purchase_date_is_passed_to_policy_llm() -> None:
+    purchase_date = (date.today() - timedelta(days=40)).isoformat()
+    model = FakeChatModel(
+        _response(
+            decision="not_eligible",
+            summary="The purchase was 40 days ago, outside the 30-day return window.",
+            final_sale=False,
+            return_window_days=30,
+            return_eligible=False,
+        )
+    )
+
+    result = policy_agent(
+        {
+            "request_text": "Can I return my order #1003?",
+            "operations_result": {
+                "outcome": "order_details_retrieved",
+                "summary": "Order 1003 details retrieved.",
+                "order_status": "Delivered",
+                "purchase_date": purchase_date,
+            },
+        },
+        llm=model,
+        retriever=lambda _: [
+            Document(
+                page_content="Standard returns are allowed within 30 calendar days from purchase.",
+                metadata={"section": "Returns and Exchanges", "subsection": "Return Window"},
+            )
+        ],
+    )
+
+    assert result["policy_result"]["return_eligible"] is False
+    prompt_text = _text_from_messages(model.structured.messages)
+    assert purchase_date in prompt_text
+    assert '"days_since_purchase": 40' in prompt_text
+    assert "30 calendar days" in prompt_text
 
 
 def test_empty_retrieval_returns_safe_result_without_calling_llm() -> None:

@@ -61,6 +61,23 @@ def test_order_details_purchase_date_routes_to_operations() -> None:
     assert result["route"] == "operations"
 
 
+def test_order_specific_return_eligibility_routes_to_operations_first() -> None:
+    result = supervisor_agent(
+        _state("Can I return my order #1003?"), llm=Mock()
+    )
+
+    assert result["route"] == "operations"
+    assert "order details" in result["reason"].lower()
+
+
+def test_order_reference_alone_does_not_turn_refund_policy_faq_into_lookup() -> None:
+    result = supervisor_agent(
+        _state("What is the refund policy for order #1003?"), llm=Mock()
+    )
+
+    assert result["route"] == "policy"
+
+
 def test_damaged_order_and_refund_routes_to_escalation() -> None:
     result = supervisor_agent(
         _state("My order #1002 arrived damaged and I want a refund."), llm=Mock()

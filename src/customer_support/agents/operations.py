@@ -23,8 +23,10 @@ dates, item details, or reported issues. Never invent order data and never infer
 an order ID from dates or other context. If the customer has not provided a
 numeric order ID, do not call a tool. Use get_order_status for questions asking
 where an order is or its current status. Use get_order_details when the customer
-asks for a purchase date or other order details. Pass the order ID exactly as
-provided, without the # marker."""
+asks for a purchase date, other order details, or asks whether an order qualifies
+for a return or exchange. Return the retrieved facts for the Policy Agent to
+evaluate; do not decide policy eligibility yourself. Pass the order ID exactly
+as provided, without the # marker."""
 
 _DEFAULT_TOOLS: tuple[BaseTool, ...] = (get_order_status, get_order_details)
 

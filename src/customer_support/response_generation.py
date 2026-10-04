@@ -22,8 +22,12 @@ def generate_final_response(state: CustomerSupportState) -> dict[str, str]:
         result = state.get("policy_result")
         response = _text_or_fallback(result.get("summary") if result else None)
     elif route == "operations":
-        result = state.get("operations_result")
-        response = _operations_response(result)
+        policy_result = state.get("policy_result")
+        if policy_result is not None:
+            response = _text_or_fallback(policy_result.get("summary"))
+        else:
+            result = state.get("operations_result")
+            response = _operations_response(result)
     elif route == "escalation":
         result = state.get("escalation_result")
         response = _escalation_response(result, state.get("human_decision"))

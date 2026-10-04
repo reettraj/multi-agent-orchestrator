@@ -94,6 +94,20 @@ def test_order_1003_details_include_purchase_date() -> None:
     assert json.loads(tool_message.content)["purchase_date"] == result["purchase_date"]
 
 
+def test_return_eligibility_lookup_uses_order_details_tool() -> None:
+    llm = _finished_llm("get_order_details", "1003")
+
+    result = operations_agent(
+        {"request_text": "Can I return my order #1003?"},
+        llm=llm,
+    )["operations_result"]
+
+    assert result["outcome"] == "order_details_retrieved"
+    assert result["purchase_date"] is not None
+    prompt = " ".join(llm.invocations[0][0].content.split())
+    assert "order qualifies for a return or exchange" in prompt
+
+
 def test_unknown_order_is_reported_without_inventing_details() -> None:
     llm = _finished_llm("get_order_status", "999999")
 

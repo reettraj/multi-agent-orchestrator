@@ -26,8 +26,10 @@ for transactional lookups such as an order's current status, purchase date, or
 other order details. Use escalation for transactional refund requests, strong
 anger or frustration, damaged/defective orders, or requests for human approval
 or an exception. An informational question about the refund policy belongs to
-policy; a request to issue a refund belongs to escalation. Base the route and
-brief reason only on the supplied request and shared-state context."""
+policy; a request to issue a refund belongs to escalation. For an eligibility
+question about a specific order, use operations first so its facts can be checked
+before policy assessment. Base the route and brief reason only on the supplied
+request and shared-state context."""
 
 
 class SupervisorDecision(TypedDict):
@@ -108,7 +110,13 @@ def _deterministic_route(
             "reason": "The request includes a refund, strong negative sentiment, an item issue, or a need for human authorization.",
         }
 
-    # Policy requests take precedence over an order number mentioned as context.
+    if requires_order_policy_lookup(state, request_text):
+        return {
+            "route": "operations",
+            "reason": "Order details are needed before evaluating the return or refund policy.",
+        }
+
+    # Ordinary policy requests remain single-agent policy routes.
     if _is_policy_request(text, intent):
         return {"route": "policy", "reason": "The request asks about a store policy or product-fit guidance."}
 
@@ -122,6 +130,35 @@ def _deterministic_route(
         return {"route": "operations", "reason": "The request asks for transactional information about a specific order."}
 
     return None
+
+
+def requires_order_policy_lookup(
+    state: Mapping[str, object], request_text: str | None = None
+) -> bool:
+    """Return whether an order-specific return/refund policy needs order facts."""
+
+    text = (
+        request_text
+        if request_text is not None
+        else str(state.get("request_text") or "")
+    ).lower()
+    intent = _normalize_intent(state.get("intent"))
+    has_order_reference = bool(state.get("order_id")) or bool(
+        re.search(r"#\s*\d+\b|\border\b.{0,20}\b\d+\b", text)
+    )
+    policy_question = intent in {
+        "return_eligibility",
+        "return_request",
+        "refund_eligibility",
+        "exchange_eligibility",
+    } or bool(
+        re.search(r"\b(return(?:ing)?|exchange)\b", text)
+        or (
+            re.search(r"\brefund\b", text)
+            and re.search(r"\b(eligib(?:le|ility)|qualif(?:y|ies)|allowed)\b", text)
+        )
+    )
+    return has_order_reference and policy_question
 
 
 def _is_escalation_request(text: str, state: Mapping[str, object], intent: str) -> bool:

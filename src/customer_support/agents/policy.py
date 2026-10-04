@@ -1,7 +1,9 @@
 """Policy assessment agent using retrieved store-policy context."""
 
+import json
 import os
 from collections.abc import Callable, Sequence
+from datetime import date
 from typing import Literal
 
 from langchain_core.documents import Document
@@ -11,7 +13,7 @@ from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
 from customer_support.policy_retrieval import search_policy_chunks
-from customer_support.state import CustomerSupportState, PolicyResult
+from customer_support.state import CustomerSupportState, OperationsResult, PolicyResult
 
 
 DEFAULT_CHAT_MODEL = "gpt-4o-mini"
@@ -27,10 +29,13 @@ Set final_sale to true only when the request or supplied facts identify the item
 as sale/final-sale, false only when it is established as not sale/final-sale,
 and null when that fact is unknown. Set return_eligible only when both the
 relevant policy and the facts in the request/context support a conclusion;
-otherwise use null. return_window_days should report the window stated in the
-retrieved policy, or null if no window is stated. An exception for a reported
-damaged, defective, or incorrectly fulfilled item means review is needed; do
-not promise approval.
+otherwise use null. When system-retrieved order context includes a purchase date
+and elapsed calendar days, compare that age against the return window stated in
+the retrieved policy. Do not assume a window if the policy context does not
+state one. return_window_days should report the window stated in the retrieved
+policy, or null if no window is stated. An exception for a reported damaged,
+defective, or incorrectly fulfilled item means review is needed; do not promise
+approval.
 
 Use one of these decision values: eligible, not_eligible, review_required,
 insufficient_information. Return only the requested structured fields."""
@@ -82,12 +87,14 @@ def policy_agent(
 
     model = llm or _create_chat_model()
     structured_model = model.with_structured_output(_PolicyAssessment)
+    order_context = _format_order_context(state.get("operations_result"))
     messages = [
         SystemMessage(content=POLICY_SYSTEM_PROMPT),
         HumanMessage(
             content=(
                 f"Customer request:\n{request_text}\n\n"
-                f"Retrieved policy context:\n{context}"
+                f"Retrieved policy context:\n{context}\n\n"
+                f"Verified order context:\n{order_context}"
             )
         ),
     ]
@@ -123,6 +130,29 @@ def _format_policy_context(documents: Sequence[Document]) -> str:
         source = " / ".join(headings) or metadata.get("source", "Policy")
         formatted.append(f"[{source}]\n{text}")
     return "\n\n".join(formatted)
+
+
+def _format_order_context(result: OperationsResult | None) -> str:
+    """Provide verified order facts and elapsed purchase age to policy reasoning."""
+
+    if not result:
+        return "No order details have been retrieved."
+
+    facts: dict[str, str | int | None] = {
+        "order_status": result.get("order_status"),
+        "purchase_date": result.get("purchase_date"),
+        "days_since_purchase": None,
+    }
+    purchase_date = result.get("purchase_date")
+    if purchase_date:
+        try:
+            facts["days_since_purchase"] = (
+                date.today() - date.fromisoformat(purchase_date)
+            ).days
+        except ValueError:
+            # Preserve the source date but do not infer an age from malformed data.
+            pass
+    return json.dumps(facts, ensure_ascii=False, sort_keys=True)
 
 
 def _insufficient_context_result() -> PolicyResult:

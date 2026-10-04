@@ -18,7 +18,11 @@ from langgraph.graph.state import CompiledStateGraph
 from customer_support.agents.escalation import escalation_agent
 from customer_support.agents.operations import operations_agent
 from customer_support.agents.policy import policy_agent
-from customer_support.agents.supervisor import Route, supervisor_agent
+from customer_support.agents.supervisor import (
+    Route,
+    requires_order_policy_lookup,
+    supervisor_agent,
+)
 from customer_support.hitl_escalation import human_approval_node
 from customer_support.response_generation import generate_final_response
 from customer_support.state import CustomerSupportState
@@ -90,7 +94,14 @@ def build_customer_support_graph(
         {"policy": "policy", "operations": "operations", "escalation": "escalation"},
     )
     workflow.add_edge("policy", "final_response")
-    workflow.add_edge("operations", "final_response")
+    workflow.add_conditional_edges(
+        "operations",
+        _policy_follow_up_required,
+        {"policy": "policy", "final_response": "final_response"},
+    )
+    # Policy normally ends after its first assessment. For an order-specific
+    # return check, Operations has already run and this second Policy pass ends
+    # directly at final response.
     workflow.add_conditional_edges(
         "escalation",
         _approval_required,
@@ -137,6 +148,20 @@ def _approval_required(state: CustomerSupportGraphState) -> str:
     escalation = state.get("escalation_result")
     if escalation and escalation.get("required") is True:
         return "human_approval"
+    return "final_response"
+
+
+def _policy_follow_up_required(state: CustomerSupportGraphState) -> str:
+    operations_result = state.get("operations_result")
+    has_order_details = bool(
+        operations_result
+        and operations_result.get("outcome") == "order_details_retrieved"
+        and operations_result.get("purchase_date")
+    )
+    if has_order_details and requires_order_policy_lookup(
+        state, state.get("request_text")
+    ):
+        return "policy"
     return "final_response"
 
 
