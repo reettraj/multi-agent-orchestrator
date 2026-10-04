@@ -1,7 +1,7 @@
 """Grounded customer-facing response generation from specialist results."""
 
 from customer_support.agents.supervisor import Route
-from customer_support.state import CustomerSupportState
+from customer_support.state import CustomerSupportState, HumanDecision
 
 
 MISSING_RESULT_RESPONSE = (
@@ -26,7 +26,7 @@ def generate_final_response(state: CustomerSupportState) -> dict[str, str]:
         response = _operations_response(result)
     elif route == "escalation":
         result = state.get("escalation_result")
-        response = _escalation_response(result)
+        response = _escalation_response(result, state.get("human_decision"))
     else:
         response = MISSING_RESULT_RESPONSE
 
@@ -53,11 +53,25 @@ def _operations_response(result: dict[str, object] | None) -> str:
     return _text_or_fallback(result.get("summary"))
 
 
-def _escalation_response(result: dict[str, object] | None) -> str:
+def _escalation_response(
+    result: dict[str, object] | None,
+    human_decision: HumanDecision | None,
+) -> str:
     if result is None:
         return MISSING_RESULT_RESPONSE
 
     reason = str(result.get("reason") or "").strip()
+    if human_decision:
+        decision = human_decision["decision"]
+        if decision == "approved":
+            response = "A human reviewer approved escalation for follow-up."
+        else:
+            response = "A human reviewer rejected escalation for follow-up."
+        decision_reason = (human_decision.get("reason") or "").strip()
+        if decision_reason:
+            response = f"{response} Review note: {decision_reason}"
+        return response
+
     if result.get("required") is True:
         if not reason:
             return "This request requires human review."

@@ -1,5 +1,7 @@
 """Integration tests for Supervisor-to-agent graph routing."""
 
+from uuid import uuid4
+
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage
 
@@ -60,6 +62,13 @@ def _state(request_text: str) -> dict[str, object]:
     }
 
 
+def _invoke(app, state: dict[str, object]) -> dict[str, object]:
+    return app.invoke(
+        state,
+        {"configurable": {"thread_id": str(uuid4())}},
+    )
+
+
 def _order_status_llm() -> FakeToolCallingLLM:
     return FakeToolCallingLLM(
         AIMessage(
@@ -100,7 +109,7 @@ def test_policy_request_runs_policy_agent_only() -> None:
         escalation_llm=escalation_llm,
     )
 
-    result = app.invoke(_state("Can I return my discounted hoodie?"))
+    result = _invoke(app, _state("Can I return my discounted hoodie?"))
 
     assert result["route"] == "policy"
     assert result["policy_result"]["final_sale"] is True
@@ -133,8 +142,8 @@ def test_order_status_request_runs_operations_agent_only() -> None:
         escalation_llm=escalation_llm,
     )
 
-    result = app.invoke(
-        _state("Can you tell me where my order #1002 is? I ordered it yesterday.")
+    result = _invoke(
+        app, _state("Can you tell me where my order #1002 is? I ordered it yesterday.")
     )
 
     assert result["route"] == "operations"
@@ -174,15 +183,13 @@ def test_damaged_refund_request_runs_escalation_agent_only() -> None:
         escalation_llm=escalation_llm,
     )
 
-    result = app.invoke(_state("My order arrived damaged and I want a refund."))
+    result = _invoke(app, _state("My order arrived damaged and I want a refund."))
 
     assert result["route"] == "escalation"
     assert result["escalation_result"]["required"] is True
     assert result["escalation_result"]["priority"] == "high"
-    assert result["final_response"] == (
-        "Human review is required: The customer is requesting a refund, which needs human review. "
-        "The customer reports a damaged or defective item that needs human assessment."
-    )
+    assert result["__interrupt__"]
+    assert result["final_response"] is None
     assert result["policy_result"] is None
     assert result["operations_result"] is None
     assert escalation_llm.structured.invocation_count == 1
@@ -205,7 +212,7 @@ def test_graph_uses_supervisor_route_as_its_only_dispatch_value() -> None:
         policy_retriever=lambda _: [Document(page_content="Use the size chart.")],
     )
 
-    result = app.invoke(_state("How should I use the size chart?"))
+    result = _invoke(app, _state("How should I use the size chart?"))
 
     assert result["route"] == "policy"
     assert result["route_reason"]
@@ -217,7 +224,7 @@ def test_final_response_contains_only_order_facts_in_operations_result() -> None
     operations_llm = _order_status_llm()
     app = build_customer_support_graph(operations_llm=operations_llm)
 
-    result = app.invoke(_state("Where is order #1002?"))
+    result = _invoke(app, _state("Where is order #1002?"))
 
     assert result["operations_result"]["purchase_date"] is None
     assert result["final_response"] == "The current status of your order is Processing."

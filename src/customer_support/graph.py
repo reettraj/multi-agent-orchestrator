@@ -1,19 +1,31 @@
-"""Main customer-support graph connecting the Supervisor to specialist agents."""
+"""Main customer-support graph and resumable escalation review flow."""
 
+from contextlib import contextmanager
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import TypedDict
+from typing import Iterator
 
 from langchain_core.documents import Document
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.tools import BaseTool
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 
 from customer_support.agents.escalation import escalation_agent
 from customer_support.agents.operations import operations_agent
 from customer_support.agents.policy import policy_agent
 from customer_support.agents.supervisor import Route, supervisor_agent
+from customer_support.hitl_escalation import human_approval_node
 from customer_support.response_generation import generate_final_response
 from customer_support.state import CustomerSupportState
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CHECKPOINT_PATH = PROJECT_ROOT / ".checkpoints" / "customer_support.sqlite"
 
 
 class CustomerSupportGraphState(CustomerSupportState):
@@ -31,13 +43,14 @@ def build_customer_support_graph(
     operations_llm: BaseChatModel | None = None,
     operations_tools: Sequence[BaseTool] | None = None,
     escalation_llm: BaseChatModel | None = None,
+    checkpointer: BaseCheckpointSaver | None = None,
 ):
     """Build and compile the main graph with optional injectable agent dependencies.
 
     The Supervisor is the entry point. Its route value selects exactly one
-    specialist node, which then exits the graph. This stage deliberately has no
-    response is generated from the specialist's structured result. This graph
-    does not include the isolated HITL workflow.
+    specialist node. Escalation results requiring human review pause at the
+    reusable HITL approval node. After any required decision, the graph creates
+    its final response and ends.
     """
 
     workflow = StateGraph(CustomerSupportGraphState)
@@ -58,10 +71,16 @@ def build_customer_support_graph(
     def final_response_node(state: CustomerSupportGraphState) -> dict[str, str]:
         return generate_final_response(state)
 
+    def human_approval_node_wrapper(
+        state: CustomerSupportGraphState,
+    ) -> dict[str, object]:
+        return human_approval_node(state)
+
     workflow.add_node("supervisor", supervisor_node)
     workflow.add_node("policy", policy_node)
     workflow.add_node("operations", operations_node)
     workflow.add_node("escalation", escalation_node)
+    workflow.add_node("human_approval", human_approval_node_wrapper)
     workflow.add_node("final_response", final_response_node)
 
     workflow.set_entry_point("supervisor")
@@ -72,9 +91,37 @@ def build_customer_support_graph(
     )
     workflow.add_edge("policy", "final_response")
     workflow.add_edge("operations", "final_response")
-    workflow.add_edge("escalation", "final_response")
+    workflow.add_conditional_edges(
+        "escalation",
+        _approval_required,
+        {"human_approval": "human_approval", "final_response": "final_response"},
+    )
+    workflow.add_edge("human_approval", "final_response")
     workflow.add_edge("final_response", END)
-    return workflow.compile()
+    return workflow.compile(
+        checkpointer=checkpointer if checkpointer is not None else InMemorySaver()
+    )
+
+
+@contextmanager
+def create_customer_support_graph(
+    checkpoint_path: str | Path = DEFAULT_CHECKPOINT_PATH,
+    **agent_dependencies: object,
+) -> Iterator[CompiledStateGraph]:
+    """Yield a main graph backed by a persistent local SQLite checkpoint store.
+
+    Keep the context open while invoking and resuming runs. Pass the same
+    ``configurable.thread_id`` to each invocation for the same request. The
+    store makes pending interrupts resumable after the graph is recreated.
+    """
+
+    path = Path(checkpoint_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with SqliteSaver.from_conn_string(str(path)) as checkpointer:
+        yield build_customer_support_graph(
+            checkpointer=checkpointer,
+            **agent_dependencies,  # type: ignore[arg-type]
+        )
 
 
 def _selected_route(state: CustomerSupportGraphState) -> Route:
@@ -86,6 +133,14 @@ def _selected_route(state: CustomerSupportGraphState) -> Route:
     return route
 
 
-# Convenient default graph for application use. Model clients are created lazily
-# inside their respective agents only when the graph is invoked.
+def _approval_required(state: CustomerSupportGraphState) -> str:
+    escalation = state.get("escalation_result")
+    if escalation and escalation.get("required") is True:
+        return "human_approval"
+    return "final_response"
+
+
+# Convenient default graph for in-process use. Use
+# create_customer_support_graph() when checkpoint persistence across graph
+# recreation or process restarts is needed. Model clients are created lazily.
 graph = build_customer_support_graph()

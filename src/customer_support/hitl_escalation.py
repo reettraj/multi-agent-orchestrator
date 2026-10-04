@@ -43,14 +43,14 @@ def create_hitl_escalation_workflow(
     path.parent.mkdir(parents=True, exist_ok=True)
     with SqliteSaver.from_conn_string(str(path)) as checkpointer:
         builder = StateGraph(CustomerSupportState)
-        builder.add_node("human_approval", _human_approval_node)
+        builder.add_node("human_approval", human_approval_node)
         builder.add_edge(START, "human_approval")
         builder.add_edge("human_approval", END)
         yield builder.compile(checkpointer=checkpointer)
 
 
-def _human_approval_node(state: CustomerSupportState) -> dict[str, HumanDecision | None]:
-    """Pause for a human decision only when escalation is required."""
+def human_approval_node(state: CustomerSupportState) -> dict[str, HumanDecision | None]:
+    """Reusable approval node that pauses only when escalation is required."""
 
     escalation: EscalationResult | None = state.get("escalation_result")
     if not escalation or escalation.get("required") is not True:
