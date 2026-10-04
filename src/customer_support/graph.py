@@ -12,6 +12,7 @@ from customer_support.agents.escalation import escalation_agent
 from customer_support.agents.operations import operations_agent
 from customer_support.agents.policy import policy_agent
 from customer_support.agents.supervisor import Route, supervisor_agent
+from customer_support.response_generation import generate_final_response
 from customer_support.state import CustomerSupportState
 
 
@@ -35,7 +36,8 @@ def build_customer_support_graph(
 
     The Supervisor is the entry point. Its route value selects exactly one
     specialist node, which then exits the graph. This stage deliberately has no
-    response-generation node and does not include the isolated HITL workflow.
+    response is generated from the specialist's structured result. This graph
+    does not include the isolated HITL workflow.
     """
 
     workflow = StateGraph(CustomerSupportGraphState)
@@ -53,10 +55,14 @@ def build_customer_support_graph(
     def escalation_node(state: CustomerSupportGraphState) -> dict[str, object]:
         return escalation_agent(state, llm=escalation_llm)
 
+    def final_response_node(state: CustomerSupportGraphState) -> dict[str, str]:
+        return generate_final_response(state)
+
     workflow.add_node("supervisor", supervisor_node)
     workflow.add_node("policy", policy_node)
     workflow.add_node("operations", operations_node)
     workflow.add_node("escalation", escalation_node)
+    workflow.add_node("final_response", final_response_node)
 
     workflow.set_entry_point("supervisor")
     workflow.add_conditional_edges(
@@ -64,9 +70,10 @@ def build_customer_support_graph(
         _selected_route,
         {"policy": "policy", "operations": "operations", "escalation": "escalation"},
     )
-    workflow.add_edge("policy", END)
-    workflow.add_edge("operations", END)
-    workflow.add_edge("escalation", END)
+    workflow.add_edge("policy", "final_response")
+    workflow.add_edge("operations", "final_response")
+    workflow.add_edge("escalation", "final_response")
+    workflow.add_edge("final_response", END)
     return workflow.compile()
 
 
