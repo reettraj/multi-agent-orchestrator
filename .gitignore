@@ -37,6 +37,7 @@ htmlcov/
 .env.*
 !.env.example
 .chroma/
+.checkpoints/
 
 # Logs and editor swap files
 *.log
