@@ -61,6 +61,17 @@ def test_damaged_order_and_refund_request_requires_escalation() -> None:
     assert result["required"] is True
     assert "refund" in result["reason"].lower()
     assert "damaged" in result["reason"].lower()
+
+
+def test_torn_and_ruined_order_is_recognized_as_damaged() -> None:
+    result = escalation_agent(
+        {"request_text": "My order #1001 arrived completely torn and ruined! I want a refund right now!"},
+        llm=FakeChatModel(_assessment(False, "No issue found.", None)),
+    )["escalation_result"]
+
+    assert result["required"] is True
+    assert "damaged or defective" in result["reason"].lower()
+    assert "refund" in result["reason"].lower()
     assert result["priority"] == "high"
 
 

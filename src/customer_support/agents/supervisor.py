@@ -104,7 +104,7 @@ def _deterministic_route(
         reason = str(existing_escalation.get("reason") or "An escalation assessment requires human review.")
         return {"route": "escalation", "reason": reason}
 
-    if _is_escalation_request(text, state, intent):
+    if _has_escalation_risk_signal(text, state, intent):
         return {
             "route": "escalation",
             "reason": "The request includes a refund, strong negative sentiment, an item issue, or a need for human authorization.",
@@ -114,6 +114,12 @@ def _deterministic_route(
         return {
             "route": "operations",
             "reason": "Order details are needed before evaluating the return or refund policy.",
+        }
+
+    if _is_escalation_request(text, state, intent):
+        return {
+            "route": "escalation",
+            "reason": "The customer is asking for a refund or other transactional escalation.",
         }
 
     # Ordinary policy requests remain single-agent policy routes.
@@ -146,23 +152,58 @@ def requires_order_policy_lookup(
     has_order_reference = bool(state.get("order_id")) or bool(
         re.search(r"#\s*\d+\b|\border\b.{0,20}\b\d+\b", text)
     )
-    policy_question = intent in {
+    eligibility_intent = intent in {
         "return_eligibility",
         "return_request",
         "refund_eligibility",
         "exchange_eligibility",
-    } or bool(
-        re.search(r"\b(return(?:ing)?|exchange)\b", text)
-        or (
-            re.search(r"\brefund\b", text)
-            and re.search(r"\b(eligib(?:le|ility)|qualif(?:y|ies)|allowed)\b", text)
+    }
+    return_question = bool(
+        re.search(
+            r"\b(can|could|would|may|am\s+i|is\s+(?:it|my|this)|does\s+my|do\s+i)\b"
+            r".{0,80}\b(return(?:ing)?|exchange|send\s+(?:it|this|the\s+order)\s+back|"
+            r"ship\s+(?:it|this|the\s+order)\s+back)\b",
+            text,
+        )
+        or re.search(
+            r"\b(return|exchange|refund)\b.{0,35}\b(eligib(?:le|ility)|qualif(?:y|ies)|allowed)\b",
+            text,
         )
     )
-    return has_order_reference and policy_question
+    return has_order_reference and (eligibility_intent or return_question)
 
 
 def _is_escalation_request(text: str, state: Mapping[str, object], intent: str) -> bool:
     """Recognize clear risk and human-review requests, excluding refund FAQs."""
+
+    return _has_escalation_risk_signal(text, state, intent) or _refund_requested(
+        text, intent
+    )
+
+
+def _refund_requested(text: str, intent: str) -> bool:
+    """Recognize an actual transactional refund request."""
+
+    if intent in {"refund", "refund_request", "request_refund"}:
+        return True
+    return bool(
+        re.search(
+            r"\b(want|need|request|issue|process|approve|give|get|send|receive)\b"
+            r".{0,35}\b(?:a\s+)?refund\b",
+            text,
+        )
+        or re.search(r"\brefund\s+(?:me|my|for\s+order)\b", text)
+        or re.search(
+            r"\b(?:want|need|request|get|give)\b.{0,30}\b(?:my\s+)?money\s+back\b",
+            text,
+        )
+    )
+
+
+def _has_escalation_risk_signal(
+    text: str, state: Mapping[str, object], intent: str
+) -> bool:
+    """Recognize explicit escalation, anger, damage, or authorization signals."""
 
     if intent in {"refund", "refund_request", "request_refund", "escalation"}:
         return True
@@ -186,13 +227,7 @@ def _is_escalation_request(text: str, state: Mapping[str, object], intent: str) 
     ):
         return True
 
-    transactional_refund = re.search(
-        r"\b(want|need|request|issue|process|approve|give|get|send|receive)\b"
-        r".{0,35}\b(?:a\s+)?refund\b|\brefund\s+(?:me|my)\b|"
-        r"\b(?:want|need|request|get|give)\b.{0,30}\b(?:my\s+)?money\s+back\b",
-        text,
-    )
-    return bool(transactional_refund)
+    return False
 
 
 def _is_policy_request(text: str, intent: str) -> bool:

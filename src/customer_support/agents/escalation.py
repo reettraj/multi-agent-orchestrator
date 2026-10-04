@@ -171,7 +171,7 @@ def _detect_escalation_signals(
         )
 
     if re.search(
-        r"\b(damaged|defective|broken|unsafe|dangerous|malfunction(?:ing)?|not working)\b",
+        r"\b(damaged|defective|broken|torn|ruined|unsafe|dangerous|malfunction(?:ing)?|not working)\b",
         text,
     ):
         priority = "urgent" if re.search(r"\b(unsafe|dangerous)\b", text) else "high"

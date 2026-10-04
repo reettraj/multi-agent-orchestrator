@@ -92,7 +92,7 @@ def test_order_1003_runs_operations_then_policy_with_verified_order_context() ->
         {
             "messages": [],
             "request_id": "return-workflow-1003",
-            "request_text": "Can I return my order #1003?",
+            "request_text": "I received order #1003 about 40 days ago. Can I send it back for a refund?",
             "order_id": None,
             "intent": None,
             "customer_sentiment": None,
@@ -116,7 +116,7 @@ def test_order_1003_runs_operations_then_policy_with_verified_order_context() ->
     assert operation_result["outcome"] == "order_details_retrieved"
     assert operation_result["purchase_date"] == "2026-08-25"
     assert days_since_purchase > 30
-    assert retrieval_queries == ["Can I return my order #1003?"]
+    assert retrieval_queries == ["I received order #1003 about 40 days ago. Can I send it back for a refund?"]
     operations_prompt = " ".join(operations_llm.invocations[0][0].content.split())
     assert "order qualifies for a return or exchange" in operations_prompt
     assert len(operations_llm.invocations) == 2

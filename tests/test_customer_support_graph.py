@@ -109,7 +109,10 @@ def test_policy_request_runs_policy_agent_only() -> None:
         escalation_llm=escalation_llm,
     )
 
-    result = _invoke(app, _state("Can I return my discounted hoodie?"))
+    result = _invoke(
+        app,
+        _state("I bought a hoodie on sale last week, but it doesn't fit. Can I return it?"),
+    )
 
     assert result["route"] == "policy"
     assert result["policy_result"]["final_sale"] is True

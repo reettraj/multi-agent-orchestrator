@@ -67,7 +67,7 @@ def test_main_graph_interrupts_and_resumes_with_human_decision(
     thread_id = str(uuid4())
     config = _config(thread_id)
     escalation_llm = _escalation_llm()
-    request_text = "My order arrived damaged and I want a refund."
+    request_text = "My order #1001 arrived completely torn and ruined! I want a refund right now!"
 
     with create_customer_support_graph(
         checkpoint_path,
@@ -83,6 +83,8 @@ def test_main_graph_interrupts_and_resumes_with_human_decision(
     assert interrupt_payload["escalation"]["required"] is True
     assert interrupt_payload["escalation"]["reason"]
     assert interrupt_payload["escalation"]["priority"] == "high"
+    assert "damaged or defective" in interrupt_payload["escalation"]["reason"].lower()
+    assert "refund" in interrupt_payload["escalation"]["reason"].lower()
     assert interrupt_payload["allowed_decisions"] == ["approved", "rejected"]
     assert snapshot.values["escalation_result"]["reason"] == interrupt_payload["escalation"]["reason"]
     assert snapshot.values["final_response"] is None
